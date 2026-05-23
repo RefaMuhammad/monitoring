@@ -231,7 +231,7 @@ if "last_check" not in st.session_state:
 if "running" not in st.session_state:
     st.session_state.running = False
 if "check_interval" not in st.session_state:
-    st.session_state.check_interval = 10  # minutes
+    st.session_state.check_interval = 30  # minutes
 
 LOG_FILE = "uptime_log.csv"
 
