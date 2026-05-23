@@ -4,6 +4,15 @@ import time
 import datetime
 import pandas as pd
 from urllib.parse import urlparse
+import os
+import csv
+import io
+import pytz
+
+WIB = pytz.timezone("Asia/Jakarta")
+
+def now_wib():
+    return datetime.datetime.now(WIB)
 
 # ── Page config ──────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -212,7 +221,7 @@ div[data-testid="stProgress"] > div {
 
 # ── Session state init ────────────────────────────────────────────────────────
 if "urls" not in st.session_state:
-    st.session_state.urls = ["https://google.com", "https://github.com"]
+    st.session_state.urls = ["https://www.facebook.com/share/v/18ETLbY1yo/"]
 if "results" not in st.session_state:
     st.session_state.results = {}
 if "log" not in st.session_state:
@@ -223,6 +232,18 @@ if "running" not in st.session_state:
     st.session_state.running = False
 if "check_interval" not in st.session_state:
     st.session_state.check_interval = 10  # minutes
+
+LOG_FILE = "uptime_log.csv"
+
+def append_log_file(entries: list):
+    """Append log entries to CSV file: datetime:url:status"""
+    file_exists = os.path.isfile(LOG_FILE)
+    with open(LOG_FILE, "a", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f, delimiter=":")
+        if not file_exists:
+            writer.writerow(["datetime", "url", "status"])
+        for e in entries:
+            writer.writerow([e["datetime"], e["url"], e["status"]])
 
 # ── Helper functions ──────────────────────────────────────────────────────────
 def normalize_url(url: str) -> str:
@@ -251,20 +272,24 @@ def check_url(url: str) -> dict:
         return {"up": False, "status_code": None, "response_ms": None, "error": str(e)[:40]}
 
 def run_checks():
-    now = datetime.datetime.now()
+    now = now_wib()
     st.session_state.last_check = now
+    new_entries = []
     for url in st.session_state.urls:
         result = check_url(url)
         st.session_state.results[url] = result
         status_str = "UP" if result["up"] else "DOWN"
-        ms_str = f"{result['response_ms']}ms" if result["response_ms"] else (result["error"] or "—")
-        st.session_state.log.append({
-            "time": now.strftime("%H:%M:%S"),
+        entry = {
+            "datetime": now.strftime("%Y-%m-%d %H:%M:%S"),
             "url": url,
             "status": status_str,
-            "detail": ms_str,
-        })
-    # keep log to last 100 entries
+            "response_ms": f"{result['response_ms']}ms" if result["response_ms"] else (result["error"] or "—"),
+        }
+        new_entries.append(entry)
+        st.session_state.log.append(entry)
+    # Save to file
+    append_log_file(new_entries)
+    # Keep log to last 100 entries
     st.session_state.log = st.session_state.log[-100:]
 
 # ── Header ────────────────────────────────────────────────────────────────────
@@ -315,7 +340,7 @@ with st.sidebar:
 
 # ── Auto-refresh logic ────────────────────────────────────────────────────────
 interval_seconds = st.session_state.check_interval * 60
-now = datetime.datetime.now()
+now = now_wib()
 
 if st.session_state.last_check is None:
     # First run: check immediately
@@ -410,18 +435,39 @@ for url in st.session_state.urls:
 if st.session_state.log:
     st.markdown("<br>", unsafe_allow_html=True)
     with st.expander(f"📋 Log ({len(st.session_state.log)} entri)", expanded=False):
-        log_df = pd.DataFrame(list(reversed(st.session_state.log)))
-        log_df.columns = ["Waktu", "URL", "Status", "Detail"]
-        st.dataframe(
-            log_df,
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "Status": st.column_config.TextColumn(
-                    "Status",
-                    width="small",
-                )
-            }
+
+        # Render log as plain text lines: datetime:url:status
+        log_lines = []
+        for e in reversed(st.session_state.log):
+            color = "#00e676" if e["status"] == "UP" else "#ff1744"
+            line = (
+                f'<div class="log-entry">'
+                f'<span style="color:#5a5a7a">{e["datetime"]}</span>'
+                f'<span style="color:#3a3a5a"> : </span>'
+                f'<span style="color:#b0b0c8">{e["url"]}</span>'
+                f'<span style="color:#3a3a5a"> : </span>'
+                f'<span style="color:{color};font-weight:700">{e["status"]}</span>'
+                f'</div>'
+            )
+            log_lines.append(line)
+
+        st.markdown(
+            '<div style="max-height:320px;overflow-y:auto;background:#0d0d18;border:1px solid #1e1e2e;border-radius:8px;padding:0.8rem 1rem;">'
+            + "\n".join(log_lines)
+            + "</div>",
+            unsafe_allow_html=True,
+        )
+
+        # Download button — raw CSV with : delimiter
+        csv_lines = ["datetime:url:status"]
+        for e in st.session_state.log:
+            csv_lines.append(f'{e["datetime"]}:{e["url"]}:{e["status"]}')
+        csv_bytes = "\n".join(csv_lines).encode("utf-8")
+        st.download_button(
+            label="⬇ Download Log (CSV)",
+            data=csv_bytes,
+            file_name=f"uptime_log_{now_wib().strftime('%Y%m%d_%H%M%S')}.csv",
+            mime="text/csv",
         )
 
 # ── Auto-rerun logic ──────────────────────────────────────────────────────────
