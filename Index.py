@@ -3,18 +3,17 @@ import requests
 import time
 import datetime
 import pandas as pd
-from urllib.parse import urlparse
 import os
-import csv
-import io
 import pytz
 
+# ── Timezone WIB ─────────────────────────────────────────────────────────────
 WIB = pytz.timezone("Asia/Jakarta")
 
 def now_wib():
-    return datetime.datetime.now(WIB)
+    """Waktu sekarang dalam WIB (UTC+7)"""
+    return datetime.datetime.now(pytz.utc).astimezone(WIB)
 
-# ── Page config ──────────────────────────────────────────────────────────────
+# ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="Uptime Monitor",
     page_icon="🟢",
@@ -31,24 +30,17 @@ html, body, [class*="css"] {
     background-color: #0a0a0f;
     color: #e8e8f0;
 }
-
-.stApp {
-    background: #0a0a0f;
-}
-
+.stApp { background: #0a0a0f; }
 h1, h2, h3 {
     font-family: 'Syne', sans-serif !important;
     font-weight: 800 !important;
     letter-spacing: -0.02em;
 }
-
-/* Header */
 .monitor-header {
     padding: 2rem 0 1rem 0;
     border-bottom: 1px solid #1e1e2e;
     margin-bottom: 2rem;
 }
-
 .monitor-title {
     font-family: 'Syne', sans-serif;
     font-size: 2.4rem;
@@ -57,7 +49,6 @@ h1, h2, h3 {
     letter-spacing: -0.03em;
     margin: 0;
 }
-
 .monitor-subtitle {
     font-family: 'JetBrains Mono', monospace;
     font-size: 0.78rem;
@@ -66,8 +57,6 @@ h1, h2, h3 {
     letter-spacing: 0.08em;
     text-transform: uppercase;
 }
-
-/* Status card */
 .status-card {
     background: #13131f;
     border: 1px solid #1e1e2e;
@@ -79,20 +68,11 @@ h1, h2, h3 {
     gap: 1rem;
     transition: border-color 0.2s;
 }
-
 .status-card:hover { border-color: #2e2e4e; }
-
-.status-dot {
-    width: 12px;
-    height: 12px;
-    border-radius: 50%;
-    flex-shrink: 0;
-}
-
-.dot-up   { background: #00e676; box-shadow: 0 0 8px #00e676aa; }
-.dot-down { background: #ff1744; box-shadow: 0 0 8px #ff1744aa; }
+.status-dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+.dot-up      { background: #00e676; box-shadow: 0 0 8px #00e676aa; }
+.dot-down    { background: #ff1744; box-shadow: 0 0 8px #ff1744aa; }
 .dot-unknown { background: #5a5a7a; }
-
 .site-url {
     font-family: 'JetBrains Mono', monospace;
     font-size: 0.88rem;
@@ -102,11 +82,9 @@ h1, h2, h3 {
     text-overflow: ellipsis;
     white-space: nowrap;
 }
-
-.status-label-up   { color: #00e676; font-size: 0.82rem; font-weight: 700; font-family: 'JetBrains Mono', monospace; }
-.status-label-down { color: #ff1744; font-size: 0.82rem; font-weight: 700; font-family: 'JetBrains Mono', monospace; }
+.status-label-up    { color: #00e676; font-size: 0.82rem; font-weight: 700; font-family: 'JetBrains Mono', monospace; }
+.status-label-down  { color: #ff1744; font-size: 0.82rem; font-weight: 700; font-family: 'JetBrains Mono', monospace; }
 .status-label-unknown { color: #5a5a7a; font-size: 0.82rem; font-family: 'JetBrains Mono', monospace; }
-
 .response-time {
     font-family: 'JetBrains Mono', monospace;
     font-size: 0.78rem;
@@ -114,8 +92,6 @@ h1, h2, h3 {
     min-width: 70px;
     text-align: right;
 }
-
-/* Summary metric boxes */
 .metric-box {
     background: #13131f;
     border: 1px solid #1e1e2e;
@@ -123,14 +99,7 @@ h1, h2, h3 {
     padding: 1.2rem 1.4rem;
     text-align: center;
 }
-
-.metric-value {
-    font-family: 'Syne', sans-serif;
-    font-size: 2rem;
-    font-weight: 800;
-    line-height: 1;
-}
-
+.metric-value { font-family: 'Syne', sans-serif; font-size: 2rem; font-weight: 800; line-height: 1; }
 .metric-label {
     font-family: 'JetBrains Mono', monospace;
     font-size: 0.7rem;
@@ -139,8 +108,6 @@ h1, h2, h3 {
     letter-spacing: 0.1em;
     margin-top: 0.4rem;
 }
-
-/* Log table styling */
 .log-entry {
     font-family: 'JetBrains Mono', monospace;
     font-size: 0.78rem;
@@ -148,9 +115,8 @@ h1, h2, h3 {
     border-bottom: 1px solid #1a1a2a;
     color: #8888aa;
 }
-
-/* Input styling override */
-div[data-testid="stTextInput"] input {
+div[data-testid="stTextInput"] input,
+div[data-testid="stNumberInput"] input {
     background: #13131f !important;
     border: 1px solid #2e2e4e !important;
     border-radius: 8px !important;
@@ -158,16 +124,6 @@ div[data-testid="stTextInput"] input {
     font-family: 'JetBrains Mono', monospace !important;
     font-size: 0.88rem !important;
 }
-
-div[data-testid="stNumberInput"] input {
-    background: #13131f !important;
-    border: 1px solid #2e2e4e !important;
-    border-radius: 8px !important;
-    color: #e8e8f0 !important;
-    font-family: 'JetBrains Mono', monospace !important;
-}
-
-/* Button */
 .stButton > button {
     background: #1e1e3f !important;
     border: 1px solid #3a3a6a !important;
@@ -179,16 +135,8 @@ div[data-testid="stNumberInput"] input {
     letter-spacing: 0.03em !important;
     transition: all 0.2s !important;
 }
-
-.stButton > button:hover {
-    background: #2a2a5a !important;
-    border-color: #5a5a9a !important;
-}
-
-/* Divider */
+.stButton > button:hover { background: #2a2a5a !important; border-color: #5a5a9a !important; }
 hr { border-color: #1e1e2e !important; }
-
-/* Countdown bar */
 .countdown-bar-wrap {
     background: #13131f;
     border: 1px solid #1e1e2e;
@@ -199,19 +147,16 @@ hr { border-color: #1e1e2e !important; }
     align-items: center;
     gap: 1rem;
 }
-
 .countdown-text {
     font-family: 'JetBrains Mono', monospace;
     font-size: 0.8rem;
     color: #5a5a7a;
     white-space: nowrap;
 }
-
 .stProgress > div > div > div {
     background: linear-gradient(90deg, #3a3aff, #00e676) !important;
     border-radius: 4px !important;
 }
-
 div[data-testid="stProgress"] > div {
     background: #1e1e2e !important;
     border-radius: 4px !important;
@@ -228,22 +173,10 @@ if "log" not in st.session_state:
     st.session_state.log = []
 if "last_check" not in st.session_state:
     st.session_state.last_check = None
-if "running" not in st.session_state:
-    st.session_state.running = False
 if "check_interval" not in st.session_state:
-    st.session_state.check_interval = 30  # minutes
+    st.session_state.check_interval = 30
 
-LOG_FILE = "uptime_log.csv"
-
-def append_log_file(entries: list):
-    """Append log entries to CSV file: datetime:url:status"""
-    file_exists = os.path.isfile(LOG_FILE)
-    with open(LOG_FILE, "a", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f, delimiter=":")
-        if not file_exists:
-            writer.writerow(["datetime", "url", "status"])
-        for e in entries:
-            writer.writerow([e["datetime"], e["url"], e["status"]])
+LOG_FILE = "uptime_log.txt"
 
 # ── Helper functions ──────────────────────────────────────────────────────────
 def normalize_url(url: str) -> str:
@@ -252,18 +185,59 @@ def normalize_url(url: str) -> str:
         url = "https://" + url
     return url
 
+# Keyword yang menandakan konten tidak tersedia
+DEAD_KEYWORDS = [
+    "this content isn't available",
+    "this content is no longer available",
+    "konten ini tidak tersedia",
+    "page not found",
+    "content not found",
+    "sorry, this page isn't available",
+    "halaman tidak ditemukan",
+    "the link you followed may be broken",
+]
+
+def is_redirected_away(original_url: str, final_url: str) -> bool:
+    """Cek apakah redirect menjauh dari URL asli (indikasi konten dihapus)"""
+    from urllib.parse import urlparse
+    orig = urlparse(original_url)
+    final = urlparse(final_url)
+    # Beda domain = pasti redirect jauh
+    if orig.netloc != final.netloc:
+        return True
+    # Path berubah drastis: misal /share/v/xxx -> / atau /login
+    orig_depth = len([p for p in orig.path.split("/") if p])
+    final_depth = len([p for p in final.path.split("/") if p])
+    if orig_depth >= 2 and final_depth <= 1:
+        return True
+    return False
+
 def check_url(url: str) -> dict:
     try:
         start = time.time()
-        resp = requests.get(url, timeout=10, allow_redirects=True)
+        headers = {"User-Agent": "Mozilla/5.0 (compatible; UptimeMonitor/1.0)"}
+        resp = requests.get(url, timeout=10, allow_redirects=True, headers=headers)
         elapsed = round((time.time() - start) * 1000)
-        is_up = resp.status_code < 400
-        return {
-            "up": is_up,
-            "status_code": resp.status_code,
-            "response_ms": elapsed,
-            "error": None,
-        }
+
+        if resp.status_code >= 400:
+            return {"up": False, "status_code": resp.status_code, "response_ms": elapsed, "error": f"HTTP {resp.status_code}"}
+
+        # Cek redirect jauh dari URL asli
+        final_url = resp.url
+        if is_redirected_away(url, final_url):
+            return {"up": False, "status_code": resp.status_code, "response_ms": elapsed, "error": f"Redirected → {final_url[:50]}"}
+
+        # Cek keyword "konten tidak tersedia" di body HTML
+        try:
+            body = resp.text.lower()
+            for kw in DEAD_KEYWORDS:
+                if kw in body:
+                    return {"up": False, "status_code": resp.status_code, "response_ms": elapsed, "error": f"Konten tidak ada: '{kw[:30]}'"}
+        except Exception:
+            pass
+
+        return {"up": True, "status_code": resp.status_code, "response_ms": elapsed, "error": None}
+
     except requests.exceptions.ConnectionError:
         return {"up": False, "status_code": None, "response_ms": None, "error": "Connection refused"}
     except requests.exceptions.Timeout:
@@ -271,8 +245,16 @@ def check_url(url: str) -> dict:
     except Exception as e:
         return {"up": False, "status_code": None, "response_ms": None, "error": str(e)[:40]}
 
+def append_log_file(entries: list):
+    with open(LOG_FILE, "a", encoding="utf-8") as f:
+        for e in entries:
+            f.write(f'{e["datetime"]}:{e["url"]}:{e["status"]}\n')
+
 def run_checks():
-    now = now_wib()
+    # Ambil waktu WIB dengan benar
+    now = datetime.datetime.now(pytz.utc).astimezone(WIB)
+    ts = now.strftime("%Y-%m-%d %H:%M:%S")  # format: 2026-05-23 14:47:00
+
     st.session_state.last_check = now
     new_entries = []
     for url in st.session_state.urls:
@@ -280,31 +262,28 @@ def run_checks():
         st.session_state.results[url] = result
         status_str = "UP" if result["up"] else "DOWN"
         entry = {
-            "datetime": now.strftime("%Y-%m-%d %H:%M:%S"),
+            "datetime": ts,
             "url": url,
             "status": status_str,
             "response_ms": f"{result['response_ms']}ms" if result["response_ms"] else (result["error"] or "—"),
         }
         new_entries.append(entry)
         st.session_state.log.append(entry)
-    # Save to file
     append_log_file(new_entries)
-    # Keep log to last 100 entries
     st.session_state.log = st.session_state.log[-100:]
 
 # ── Header ────────────────────────────────────────────────────────────────────
 st.markdown("""
 <div class="monitor-header">
   <div class="monitor-title">⬡ Uptime Monitor</div>
-  <div class="monitor-subtitle">Website availability checker · auto-refresh every N minutes</div>
+  <div class="monitor-subtitle">Website availability checker · WIB (UTC+7) · auto-refresh</div>
 </div>
 """, unsafe_allow_html=True)
 
-# ── Sidebar: Settings ─────────────────────────────────────────────────────────
+# ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("### ⚙️ Pengaturan")
     st.markdown("---")
-
     interval = st.number_input(
         "Interval cek (menit)",
         min_value=1, max_value=60,
@@ -340,10 +319,9 @@ with st.sidebar:
 
 # ── Auto-refresh logic ────────────────────────────────────────────────────────
 interval_seconds = st.session_state.check_interval * 60
-now = now_wib()
+now = datetime.datetime.now(pytz.utc).astimezone(WIB)
 
 if st.session_state.last_check is None:
-    # First run: check immediately
     run_checks()
     st.rerun()
 
@@ -354,7 +332,7 @@ progress_val = 1.0 - (remaining / interval_seconds)
 # ── Countdown display ─────────────────────────────────────────────────────────
 mins_left = int(remaining) // 60
 secs_left = int(remaining) % 60
-last_str = st.session_state.last_check.strftime("%H:%M:%S") if st.session_state.last_check else "—"
+last_str = st.session_state.last_check.strftime("%Y-%m-%d %H:%M:%S WIB") if st.session_state.last_check else "—"
 
 st.markdown(f"""
 <div class="countdown-bar-wrap">
@@ -367,46 +345,27 @@ st.progress(min(progress_val, 1.0))
 
 # ── Summary metrics ───────────────────────────────────────────────────────────
 results = st.session_state.results
-total = len(st.session_state.urls)
+total    = len(st.session_state.urls)
 up_count = sum(1 for r in results.values() if r.get("up"))
-down_count = sum(1 for r in results.values() if not r.get("up"))
-avg_ms = None
-ms_vals = [r["response_ms"] for r in results.values() if r.get("response_ms")]
-if ms_vals:
-    avg_ms = round(sum(ms_vals) / len(ms_vals))
+down_count = total - up_count
+ms_vals  = [r["response_ms"] for r in results.values() if r.get("response_ms")]
+avg_ms   = round(sum(ms_vals) / len(ms_vals)) if ms_vals else None
 
 c1, c2, c3, c4 = st.columns(4)
 with c1:
-    st.markdown(f"""
-    <div class="metric-box">
-      <div class="metric-value" style="color:#e8e8f0">{total}</div>
-      <div class="metric-label">Total Sites</div>
-    </div>""", unsafe_allow_html=True)
+    st.markdown(f'<div class="metric-box"><div class="metric-value" style="color:#e8e8f0">{total}</div><div class="metric-label">Total Sites</div></div>', unsafe_allow_html=True)
 with c2:
-    st.markdown(f"""
-    <div class="metric-box">
-      <div class="metric-value" style="color:#00e676">{up_count}</div>
-      <div class="metric-label">Online</div>
-    </div>""", unsafe_allow_html=True)
+    st.markdown(f'<div class="metric-box"><div class="metric-value" style="color:#00e676">{up_count}</div><div class="metric-label">Online</div></div>', unsafe_allow_html=True)
 with c3:
-    st.markdown(f"""
-    <div class="metric-box">
-      <div class="metric-value" style="color:#ff1744">{down_count}</div>
-      <div class="metric-label">Down</div>
-    </div>""", unsafe_allow_html=True)
+    st.markdown(f'<div class="metric-box"><div class="metric-value" style="color:#ff1744">{down_count}</div><div class="metric-label">Down</div></div>', unsafe_allow_html=True)
 with c4:
     ms_display = f"{avg_ms}ms" if avg_ms else "—"
-    st.markdown(f"""
-    <div class="metric-box">
-      <div class="metric-value" style="color:#b0b0c8;font-size:1.6rem">{ms_display}</div>
-      <div class="metric-label">Avg Response</div>
-    </div>""", unsafe_allow_html=True)
+    st.markdown(f'<div class="metric-box"><div class="metric-value" style="color:#b0b0c8;font-size:1.6rem">{ms_display}</div><div class="metric-label">Avg Response</div></div>', unsafe_allow_html=True)
 
 st.markdown("<br>", unsafe_allow_html=True)
 
 # ── Status cards ──────────────────────────────────────────────────────────────
 st.markdown("### Status Sites")
-
 for url in st.session_state.urls:
     r = results.get(url)
     if r is None:
@@ -435,8 +394,6 @@ for url in st.session_state.urls:
 if st.session_state.log:
     st.markdown("<br>", unsafe_allow_html=True)
     with st.expander(f"📋 Log ({len(st.session_state.log)} entri)", expanded=False):
-
-        # Render log as plain text lines: datetime:url:status
         log_lines = []
         for e in reversed(st.session_state.log):
             color = "#00e676" if e["status"] == "UP" else "#ff1744"
@@ -452,30 +409,28 @@ if st.session_state.log:
             log_lines.append(line)
 
         st.markdown(
-            '<div style="max-height:320px;overflow-y:auto;background:#0d0d18;border:1px solid #1e1e2e;border-radius:8px;padding:0.8rem 1rem;">'
-            + "\n".join(log_lines)
-            + "</div>",
+            '<div style="max-height:320px;overflow-y:auto;background:#0d0d18;'
+            'border:1px solid #1e1e2e;border-radius:8px;padding:0.8rem 1rem;">'
+            + "\n".join(log_lines) + "</div>",
             unsafe_allow_html=True,
         )
 
-        # Download button — raw CSV with : delimiter
         csv_lines = ["datetime:url:status"]
         for e in st.session_state.log:
             csv_lines.append(f'{e["datetime"]}:{e["url"]}:{e["status"]}')
         csv_bytes = "\n".join(csv_lines).encode("utf-8")
+        ts_now = datetime.datetime.now(pytz.utc).astimezone(WIB).strftime("%Y%m%d_%H%M%S")
         st.download_button(
-            label="⬇ Download Log (CSV)",
+            label="⬇ Download Log (TXT)",
             data=csv_bytes,
-            file_name=f"uptime_log_{now_wib().strftime('%Y%m%d_%H%M%S')}.csv",
-            mime="text/csv",
+            file_name=f"uptime_log_{ts_now}.txt",
+            mime="text/plain",
         )
 
-# ── Auto-rerun logic ──────────────────────────────────────────────────────────
-# Rerun every ~5 seconds to update countdown, trigger check when time is up
+# ── Auto-rerun setiap 5 detik ─────────────────────────────────────────────────
 if remaining <= 0:
     run_checks()
     st.rerun()
 else:
-    # Sleep briefly then rerun to update the countdown display
     time.sleep(5)
     st.rerun()
