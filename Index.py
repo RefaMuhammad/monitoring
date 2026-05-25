@@ -52,7 +52,7 @@ div[data-testid="stProgress"] > div { background: #1e1e2e !important; border-rad
 
 # ── Session state ─────────────────────────────────────────────────────────────
 if "urls" not in st.session_state:
-    st.session_state.urls = ["https://web.facebook.com/share/g/1H187qpcu1/", "https://web.facebook.com/groups/1150433080601361"]
+    st.session_state.urls = ["https://web.facebook.com/share/g/1H187qpcu1/", "https://web.facebook.com/groups/1150433080601361", "https://web.facebook.com/share/p/18Zjefu9Fe/", "https://web.facebook.com/share/p/1EoLzPdKYH/", "https://web.facebook.com/share/p/1EoLzPdKYH/", "https://web.facebook.com/share/p/1Dnz854RUL/"]
 if "results" not in st.session_state:
     st.session_state.results = {}
 if "log" not in st.session_state:
@@ -66,14 +66,25 @@ LOG_FILE = "uptime_log.txt"
 
 # ── Keyword konten tidak tersedia ─────────────────────────────────────────────
 DEAD_KEYWORDS = [
+    # Indonesia
+    "konten ini tidak tersedia saat ini",
+    "konten ini tidak tersedia",
+    "konten tidak tersedia",
+    "halaman tidak ditemukan",
+    "maaf, halaman ini tidak tersedia",
+    # English
+    "this content isn't available right now",
     "this content isn't available",
     "this content is no longer available",
-    "konten ini tidak tersedia",
+    "this page isn't available",
+    "sorry, this page isn't available",
     "page not found",
     "content not found",
-    "sorry, this page isn't available",
-    "halaman tidak ditemukan",
     "the link you followed may be broken",
+    "this link may be broken",
+    # Facebook spesifik
+    "buka kabar beranda",          # muncul di halaman error FB Indonesia
+    "go to news feed",             # muncul di halaman error FB English
 ]
 
 # ── Helper functions ──────────────────────────────────────────────────────────
@@ -86,38 +97,44 @@ def normalize_url(url: str) -> str:
 import re
 from urllib.parse import unquote, urlparse
 
-def extract_fb_share_id(url: str):
-    """Ekstrak ID unik dari Facebook share URL: /share/g/ID, /share/v/ID, dll"""
-    match = re.search(r'/share/(?:[gvp]/)?([A-Za-z0-9_-]+)', url)
-    return match.group(1) if match else None
+_PATH_SKIP = {"share", "groups", "g", "v", "p", "watch", "reel", "videos", "permalink", "photo", "story"}
+
+def extract_url_id(url: str):
+    """
+    Ekstrak ID unik dari path URL.
+      /groups/1150433080601361  -> 1150433080601361
+      /share/g/1CewHY48P1/     -> 1CewHY48P1
+      /share/v/18ETLbY1yo/     -> 18ETLbY1yo
+    """
+    parsed = urlparse(unquote(url))
+    for seg in parsed.path.split("/"):
+        if seg and seg.lower() not in _PATH_SKIP and len(seg) >= 6:
+            return seg
+    return None
 
 def is_redirected_away(original_url: str, final_url: str):
     """
-    Cek apakah redirect menjauh dari konten asli.
-    Return: (bool, reason)
+    Hirarki:
+    1. HTTP status dicek duluan di check_url
+    2. Ekstrak ID unik dari URL asal, cek apakah masih ada di URL final
+    3. Fallback: cek path depth
     """
+    url_id = extract_url_id(original_url)
+
+    if url_id:
+        if url_id in unquote(final_url):
+            return False, ""   # ID masih ada = konten hidup
+        return True, f"ID '{url_id}' tidak ditemukan di URL redirect"
+
+    # Fallback jika tidak ada ID yang bisa diekstrak
     orig  = urlparse(original_url)
     final = urlparse(final_url)
-
-    # Prioritas 1: cek ID unik Facebook share — paling akurat
-    fb_id = extract_fb_share_id(original_url)
-    if fb_id:
-        if fb_id not in unquote(final_url):
-            return True, f"ID '{fb_id}' hilang dari URL redirect"
-        return False, ""  # ID masih ada = konten masih hidup
-
-    # Prioritas 2: beda domain
-    if orig.netloc.replace("www.", "") != final.netloc.replace("www.", ""):
-        return True, f"Redirect ke domain lain: {final.netloc}"
-
-    # Prioritas 3: path jauh lebih pendek (redirect ke root)
     orig_depth  = len([p for p in orig.path.split("/") if p])
     final_depth = len([p for p in final.path.split("/") if p])
     if orig_depth >= 2 and final_depth <= 1:
         return True, f"Redirect ke root: {final_url[:60]}"
 
     return False, ""
-
 def check_url(url: str) -> dict:
     try:
         start   = time.time()
