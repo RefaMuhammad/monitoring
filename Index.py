@@ -52,7 +52,7 @@ div[data-testid="stProgress"] > div { background: #1e1e2e !important; border-rad
 
 # ── Session state ─────────────────────────────────────────────────────────────
 if "urls" not in st.session_state:
-    st.session_state.urls = ["https://web.facebook.com/share/g/1H187qpcu1/", "https://web.facebook.com/groups/1150433080601361", "https://web.facebook.com/share/p/18Zjefu9Fe/", "https://web.facebook.com/share/p/1EoLzPdKYH/", "https://web.facebook.com/share/p/1EoLzPdKYH/", "https://web.facebook.com/share/p/1Dnz854RUL/"]
+    st.session_state.urls = ["https://www.instagram.com/gagak.kecilll?utm_source=ig_web_button_share_sheet&igsh=ZDNlZDc0MzIxNw=="]
 if "results" not in st.session_state:
     st.session_state.results = {}
 if "log" not in st.session_state:
@@ -60,7 +60,7 @@ if "log" not in st.session_state:
 if "last_check" not in st.session_state:
     st.session_state.last_check = None
 if "check_interval" not in st.session_state:
-    st.session_state.check_interval = 1
+    st.session_state.check_interval = 30 
 
 LOG_FILE = "uptime_log.txt"
 
@@ -99,13 +99,13 @@ from urllib.parse import unquote, urlparse
 
 _PATH_SKIP = {"share", "groups", "g", "v", "p", "watch", "reel", "videos", "permalink", "photo", "story"}
 
+# Domain yang pakai Playwright (JS rendering, blokir datacenter IP)
+SOCIAL_DOMAINS = ("facebook.com", "fb.com", "instagram.com")
+
+def is_social_url(url: str) -> bool:
+    return any(d in url for d in SOCIAL_DOMAINS)
+
 def extract_url_id(url: str):
-    """
-    Ekstrak ID unik dari path URL.
-      /groups/1150433080601361  -> 1150433080601361
-      /share/g/1CewHY48P1/     -> 1CewHY48P1
-      /share/v/18ETLbY1yo/     -> 18ETLbY1yo
-    """
     parsed = urlparse(unquote(url))
     for seg in parsed.path.split("/"):
         if seg and seg.lower() not in _PATH_SKIP and len(seg) >= 6:
@@ -113,65 +113,187 @@ def extract_url_id(url: str):
     return None
 
 def is_redirected_away(original_url: str, final_url: str):
-    """
-    Hirarki:
-    1. HTTP status dicek duluan di check_url
-    2. Ekstrak ID unik dari URL asal, cek apakah masih ada di URL final
-    3. Fallback: cek path depth
-    """
     url_id = extract_url_id(original_url)
-
     if url_id:
         if url_id in unquote(final_url):
-            return False, ""   # ID masih ada = konten hidup
+            return False, ""
         return True, f"ID '{url_id}' tidak ditemukan di URL redirect"
-
-    # Fallback jika tidak ada ID yang bisa diekstrak
     orig  = urlparse(original_url)
     final = urlparse(final_url)
     orig_depth  = len([p for p in orig.path.split("/") if p])
     final_depth = len([p for p in final.path.split("/") if p])
     if orig_depth >= 2 and final_depth <= 1:
         return True, f"Redirect ke root: {final_url[:60]}"
-
     return False, ""
-def check_url(url: str) -> dict:
+
+# ── Keyword konten tidak tersedia ─────────────────────────────────────────────
+DEAD_KEYWORDS = [
+    # ── Instagram (dari debug HTML) ───────────────────────────────────────────
+    "post tidak tersedia",           # <title>Post tidak tersedia • Instagram</title>
+    "tautan mungkin rusak",          # "Tautan mungkin rusak, atau profil mungkin sudah dihapus"
+    "sorry, this page isn't available",   # versi english
+    "the link you followed may be broken",
+    "the page may have been removed",
+    "page isn't available",
+
+    # ── Facebook (dari debug sebelumnya) ──────────────────────────────────────
+    "konten ini tidak tersedia saat ini",
+    "konten ini tidak tersedia",
+    "konten tidak tersedia",
+    "buka kabar beranda",            # tombol di halaman error FB Indonesia
+    "go to news feed",               # tombol di halaman error FB English
+    "this content isn't available right now",
+    "this content isn't available",
+    "this content is no longer available",
+    "this page isn't available",
+
+    # ── Generic ───────────────────────────────────────────────────────────────
+    "halaman tidak ditemukan",
+    "page not found",
+    "content not found",
+]
+
+# Title tag yang menandakan halaman error
+DEAD_TITLES = [
+    "post tidak tersedia",       # Instagram ID
+    "page not found",            # Instagram/FB EN
+    "content not available",
+    "sorry, this page",
+    "tidak tersedia",
+]
+
+def _extract_title(body: str) -> str:
+    """Ekstrak isi <title> dari HTML."""
+    import re
+    m = re.search(r"<title[^>]*>(.*?)</title>", body, re.IGNORECASE | re.DOTALL)
+    return m.group(1).strip().lower() if m else ""
+
+def _check_body(body: str, status_code: int, elapsed: int, resp_url: str, original_url: str) -> dict:
+    """Cek body HTML untuk keyword dan redirect. Dipakai oleh requests & playwright."""
+    redirected, reason = is_redirected_away(original_url, resp_url)
+    if redirected:
+        return {"up": False, "status_code": status_code, "response_ms": elapsed, "error": reason}
+
+    # Cek <title> dulu — paling reliable
+    title = _extract_title(body)
+    for dead_title in DEAD_TITLES:
+        if dead_title in title:
+            return {"up": False, "status_code": status_code, "response_ms": elapsed,
+                    "error": f"Konten tidak ada (title: '{title[:50]}')"}
+
+    # Cek keyword di body
+    body_lower = body.lower()
+    for kw in DEAD_KEYWORDS:
+        if kw in body_lower:
+            return {"up": False, "status_code": status_code, "response_ms": elapsed,
+                    "error": f"Konten tidak ada: '{kw[:35]}'"}
+
+    return {"up": True, "status_code": status_code, "response_ms": elapsed, "error": None}
+
+# ── Check via requests (non-social) ──────────────────────────────────────────
+def check_url_requests(url: str) -> dict:
     try:
-        start   = time.time()
-        headers = {"User-Agent": "Mozilla/5.0 (compatible; UptimeMonitor/1.0)"}
+        import time as _time
+        start   = _time.time()
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0 Safari/537.36",
+            "Accept-Language": "id-ID,id;q=0.9,en-US;q=0.8",
+        }
         resp    = requests.get(url, timeout=10, allow_redirects=True, headers=headers)
-        elapsed = round((time.time() - start) * 1000)
-
+        elapsed = round((_time.time() - start) * 1000)
         if resp.status_code >= 400:
-            return {"up": False, "status_code": resp.status_code, "response_ms": elapsed, "error": f"HTTP {resp.status_code}"}
-
-        redirected, reason = is_redirected_away(url, resp.url)
-        if redirected:
-            return {"up": False, "status_code": resp.status_code, "response_ms": elapsed, "error": reason}
-
-        try:
-            body = resp.text.lower()
-            for kw in DEAD_KEYWORDS:
-                if kw in body:
-                    return {"up": False, "status_code": resp.status_code, "response_ms": elapsed, "error": f"Konten tidak ada: '{kw[:30]}'"}
-        except Exception:
-            pass
-
-        return {"up": True, "status_code": resp.status_code, "response_ms": elapsed, "error": None}
-
+            return {"up": False, "status_code": resp.status_code, "response_ms": elapsed,
+                    "error": f"HTTP {resp.status_code}"}
+        return _check_body(resp.text, resp.status_code, elapsed, resp.url, url)
     except requests.exceptions.ConnectionError:
         return {"up": False, "status_code": None, "response_ms": None, "error": "Connection refused"}
     except requests.exceptions.Timeout:
         return {"up": False, "status_code": None, "response_ms": None, "error": "Timeout"}
     except Exception as e:
-        return {"up": False, "status_code": None, "response_ms": None, "error": str(e)[:40]}
+        return {"up": False, "status_code": None, "response_ms": None, "error": str(e)[:50]}
+
+# ── Check via Playwright (FB/IG) ──────────────────────────────────────────────
+def _playwright_worker(url: str, result_holder: list):
+    """
+    Jalankan Playwright di thread terpisah.
+    Fix Windows: set ProactorEventLoop agar asyncio bisa spawn subprocess (Chromium).
+    """
+    try:
+        import asyncio
+        import sys
+        import time as _time
+        from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
+
+        # Windows fix: Playwright butuh ProactorEventLoop untuk spawn subprocess
+        if sys.platform == "win32":
+            asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+        start = _time.time()
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch(headless=True)
+            ctx = browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0 Safari/537.36",
+                locale="id-ID",
+                java_script_enabled=True,
+            )
+            page = ctx.new_page()
+            try:
+                resp = page.goto(url, wait_until="domcontentloaded", timeout=25000)
+                page.wait_for_timeout(2500)  # tunggu JS render
+                elapsed   = round((_time.time() - start) * 1000)
+                status    = resp.status if resp else 0
+                final_url = page.url
+                body      = page.content()
+                browser.close()
+                if status >= 400:
+                    result_holder.append({"up": False, "status_code": status,
+                                          "response_ms": elapsed, "error": f"HTTP {status}"})
+                else:
+                    result_holder.append(_check_body(body, status, elapsed, final_url, url))
+            except PWTimeout:
+                browser.close()
+                elapsed = round((_time.time() - start) * 1000)
+                result_holder.append({"up": False, "status_code": None,
+                                      "response_ms": elapsed, "error": "Timeout (Playwright)"})
+    except ImportError:
+        result_holder.append({"up": None, "status_code": None, "response_ms": None,
+                              "error": "Playwright tidak terinstall: pip install playwright && playwright install chromium"})
+    except Exception as e:
+        import traceback
+        full_tb = traceback.format_exc()
+        # Tulis full traceback ke file untuk debug
+        with open("playwright_error.log", "a", encoding="utf-8") as logf:
+            logf.write(f"\n=== {url} ===\n")
+            logf.write(full_tb)
+            logf.write("\n")
+        err_detail = full_tb.strip().split("\n")[-1]
+        result_holder.append({"up": False, "status_code": None, "response_ms": None,
+                              "error": f"Playwright error: {err_detail[:120]}"})
+
+def check_url_playwright(url: str) -> dict:
+    """Jalankan _playwright_worker di thread terpisah untuk hindari asyncio conflict di Windows."""
+    import threading
+    result_holder = []
+    t = threading.Thread(target=_playwright_worker, args=(url, result_holder), daemon=True)
+    t.start()
+    t.join(timeout=35)  # maksimal tunggu 35 detik
+    if result_holder:
+        return result_holder[0]
+    return {"up": False, "status_code": None, "response_ms": None, "error": "Thread timeout / tidak ada hasil"}
+
+# ── Router utama ──────────────────────────────────────────────────────────────
+def check_url(url: str) -> dict:
+    if is_social_url(url):
+        return check_url_playwright(url)
+    return check_url_requests(url)
 
 def append_log_file(entries: list):
+    """Simpan log ke file TXT: datetime:url:status"""
     with open(LOG_FILE, "a", encoding="utf-8") as f:
         for e in entries:
-            # Format: 2026-05-24 14:47:00 WIB : https://... : UP
             f.write(f'{e["datetime"]} WIB : {e["url"]} : {e["status"]}\n')
-
 def run_checks():
     now = now_wib()                              # waktu WIB yang benar
     ts  = now.strftime("%Y-%m-%d %H:%M:%S")     # contoh: 2026-05-24 14:47:00
@@ -180,7 +302,7 @@ def run_checks():
     new_entries = []
     for url in st.session_state.urls:
         result     = check_url(url)
-        status_str = "UP" if result["up"] else "DOWN"
+        status_str = "UP" if result["up"] is True else ("UNKNOWN" if result["up"] is None else "DOWN")
         entry = {
             "datetime":    ts,
             "url":         url,
@@ -292,6 +414,10 @@ for url in st.session_state.urls:
         dot_cls = "dot-unknown"
         status_html = '<span class="status-label-unknown">PENDING</span>'
         detail = "—"
+    elif r["up"] is None:
+        dot_cls = "dot-unknown"
+        status_html = '<span class="status-label-unknown">⚠ UNKNOWN</span>'
+        detail = r.get("error") or "Tidak bisa dicek dari server"
     elif r["up"]:
         dot_cls = "dot-up"
         status_html = '<span class="status-label-up">● UP</span>'
